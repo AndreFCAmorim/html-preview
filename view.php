@@ -5,13 +5,13 @@ require __DIR__ . '/inc.php';
 /*
  * Two kinds of request reach this file:
  *  1. ?id=…&t=…  The viewer's iframe. Returns a tiny loader plus the example's HTML,
- *                encrypted with a fresh random key. The key is NOT in the response.
+ *                encrypted (AES-GCM) with a fresh random key. The key is NOT in the response.
  *  2. ?k=…       The loader asking for that key. Answered once, then forgotten,
  *                so a saved or replayed copy of response 1 can never be decrypted.
  */
 
-const KEY_BYTES   = 16;
-const RC4_DROP    = 768;
+const KEY_BYTES = 32;   // AES-256
+const IV_BYTES  = 12;
 const MAX_PENDING = 20;
 
 function deny(): never
@@ -22,28 +22,12 @@ function deny(): never
     exit('Not found');
 }
 
-/** RC4 stream cipher (same algorithm runs in the loader). */
-function rc4(string $key, string $data): string
+/** AES-256-GCM; output is iv . ciphertext . tag, which is what WebCrypto expects. */
+function seal(string $key, string $data): string
 {
-    $s = range(0, 255);
-    $kl = strlen($key);
-    for ($i = 0, $j = 0; $i < 256; $i++) {
-        $j = ($j + $s[$i] + ord($key[$i % $kl])) & 255;
-        [$s[$i], $s[$j]] = [$s[$j], $s[$i]];
-    }
-    $i = $j = 0;
-    for ($n = 0; $n < RC4_DROP; $n++) {
-        $i = ($i + 1) & 255; $j = ($j + $s[$i]) & 255;
-        [$s[$i], $s[$j]] = [$s[$j], $s[$i]];
-    }
-    $len = strlen($data);
-    $out = str_repeat("\0", $len);
-    for ($n = 0; $n < $len; $n++) {
-        $i = ($i + 1) & 255; $j = ($j + $s[$i]) & 255;
-        $t = $s[$i]; $s[$i] = $s[$j]; $s[$j] = $t;
-        $out[$n] = chr(ord($data[$n]) ^ $s[($s[$i] + $s[$j]) & 255]);
-    }
-    return $out;
+    $iv = random_bytes(IV_BYTES);
+    $ct = openssl_encrypt($data, 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $iv, $tag, '', 16);
+    return $iv . $ct . $tag;
 }
 
 $dest = $_SERVER['HTTP_SEC_FETCH_DEST'] ?? '';
@@ -96,7 +80,7 @@ session_write_close();
 
 $html = (string) file_get_contents(SLIDES_DIR . '/' . $examples[$id]['file']);
 
-$inject = '<base href="' . e(SLIDES_URL) . '">' . <<<'HTML'
+$inject = '<base href="' . e(ASSET_URL . $token . '/') . '">' . <<<'HTML'
 <style id="__viewer_lock">
   /* Scrollbars hidden but overflow left alone: setting overflow on html + body
      would break position: sticky (pinned sections) in the page. */
@@ -131,7 +115,7 @@ if (preg_match('/<head\b[^>]*>/i', $html)) {
     $html = '<head>' . $inject . '</head>' . $html;
 }
 
-$payload = base64_encode(rc4($key, $html));
+$payload = base64_encode(seal($key, $html));
 $keyUrl  = 'view.php?k=' . $nonce;
 
 header('Content-Type: text/html; charset=utf-8');
@@ -142,4 +126,4 @@ header('X-Robots-Tag: noindex, nofollow');
 header('Referrer-Policy: same-origin');
 
 // Compact loader: fetch the one-time key, decrypt, replace this document.
-?><!doctype html><html><head><meta charset="utf-8"><meta name="robots" content="noindex,nofollow"><style>html,body{margin:0;background:#fff}</style></head><body><script id="_x" type="application/octet-stream"><?= $payload ?></script><script>(async function(){var _0=document.getElementById('_x'),_1=_0.textContent;_0.remove();try{var _2=await fetch(<?= json_encode($keyUrl) ?>,{credentials:'same-origin',cache:'no-store'});if(!_2.ok)return;var k=new Uint8Array(await _2.arrayBuffer()),a=atob(_1),n=a.length,b=new Uint8Array(n),s=[],i,j=0,t,x;_1=null;for(i=0;i<256;i++)s[i]=i;for(i=0;i<256;i++){j=(j+s[i]+k[i%k.length])&255;t=s[i];s[i]=s[j];s[j]=t}i=j=0;for(x=0;x<<?= RC4_DROP ?>;x++){i=(i+1)&255;j=(j+s[i])&255;t=s[i];s[i]=s[j];s[j]=t}for(x=0;x<n;x++){i=(i+1)&255;j=(j+s[i])&255;t=s[i];s[i]=s[j];s[j]=t;b[x]=a.charCodeAt(x)^s[(s[i]+s[j])&255]}a=null;document.open();document.write(new TextDecoder('utf-8').decode(b));document.close();b=null;try{parent.__viewerReady&&parent.__viewerReady()}catch(e){}}catch(e){}})();</script></body></html>
+?><!doctype html><html><head><meta charset="utf-8"><meta name="robots" content="noindex,nofollow"><style>html,body{margin:0;background:#fff}</style></head><body><script id="_x" type="application/octet-stream"><?= $payload ?></script><script>(async function(){var _0=document.getElementById('_x'),_1=_0.textContent;_0.remove();try{var _2=await fetch(<?= json_encode($keyUrl) ?>,{credentials:'same-origin',cache:'no-store'});if(!_2.ok)return;var k=await crypto.subtle.importKey('raw',await _2.arrayBuffer(),'AES-GCM',false,['decrypt']),a=Uint8Array.from(atob(_1),function(c){return c.charCodeAt(0)});_1=null;var d=await crypto.subtle.decrypt({name:'AES-GCM',iv:a.subarray(0,<?= IV_BYTES ?>)},k,a.subarray(<?= IV_BYTES ?>));a=null;document.open();document.write(new TextDecoder('utf-8').decode(d));document.close();d=null;try{parent.__viewerReady&&parent.__viewerReady()}catch(e){}}catch(e){}})();</script></body></html>

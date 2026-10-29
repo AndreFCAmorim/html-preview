@@ -103,12 +103,7 @@ $viewerData = [
   .stage { position: relative; flex: 1; min-height: 0; overflow: hidden; }
   .device { position: absolute; inset: 0; transition: opacity .18s var(--ease); }
   .device.switching { opacity: 0; }
-  .device iframe {
-    position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: #fff;
-    pointer-events: none;            /* nothing inside can be clicked, hovered or selected */
-    opacity: 1; transition: opacity .3s var(--ease);
-  }
-  .device iframe.loading { opacity: 0; }
+  .device > div { position: absolute; inset: 0; }   /* host of the closed shadow root holding the frame */
 
   /* Tablet and phone previews: real device viewport, scaled down to fit */
   body[data-device="tablet"] .device,
@@ -191,7 +186,6 @@ $viewerData = [
 
   <main class="stage" id="stage">
     <div class="device" id="device">
-      <iframe id="frame" class="loading" tabindex="-1" title="Presentation" aria-hidden="true"></iframe>
     </div>
     <div class="shield" id="shield"></div>
   </main>
@@ -200,7 +194,23 @@ $viewerData = [
   (function () {
     const DATA = <?= json_encode($viewerData, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
 
-    const frame   = document.getElementById('frame');
+    // The frame lives in a closed shadow root, so it has no id and can't be reached
+    // through document queries.
+    const frame = document.createElement('iframe');
+    frame.className = 'loading';
+    frame.tabIndex = -1;
+    frame.setAttribute('aria-hidden', 'true');
+    {
+      const host = document.createElement('div');
+      const root = host.attachShadow({ mode: 'closed' });
+      const css = document.createElement('style');
+      css.textContent =
+        'iframe{position:absolute;inset:0;width:100%;height:100%;border:0;background:#fff;pointer-events:none;' +
+        'opacity:1;transition:opacity .3s cubic-bezier(.65,0,.35,1)}iframe.loading{opacity:0}' +
+        '@media (prefers-reduced-motion:reduce){iframe{transition:none}}';
+      root.append(css, frame);
+      document.getElementById('device').append(host);
+    }
     const shield  = document.getElementById('shield');
     const picker  = document.getElementById('picker');
     const prevBtn = document.getElementById('prevBtn');

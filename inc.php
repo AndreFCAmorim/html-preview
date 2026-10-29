@@ -4,8 +4,8 @@ declare(strict_types=1);
 /** Folder that holds the HTML examples (and their images/CSS/fonts). */
 const SLIDES_DIR = __DIR__ . '/slides';
 
-/** URL path from view.php to that folder (used as <base href>). */
-const SLIDES_URL = 'slides/';
+/** Script that serves the files in that folder, so their real URL is never exposed. */
+const ASSET_URL = 'asset.php/';
 
 /**
  * Returns every .html/.htm file in SLIDES_DIR as
