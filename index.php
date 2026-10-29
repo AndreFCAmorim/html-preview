@@ -349,13 +349,15 @@ $viewerData = [
     }
 
     /* ---------- Input: wheel, touch, keys ---------- */
-    let wheelLocked = false, wheelTimer;
+    // Locked while the page animation runs. Afterwards, trackpad inertia (a decaying tail of
+    // events) is ignored; a new gesture is a pause between events or a rising delta.
+    let lastAbs = 0, lastTime = 0;
     shield.addEventListener('wheel', e => {
       e.preventDefault();
-      clearTimeout(wheelTimer);
-      wheelTimer = setTimeout(() => { wheelLocked = false; }, 200); // waits out trackpad inertia
-      if (wheelLocked || Math.abs(e.deltaY) < 6) return;
-      wheelLocked = true;
+      const abs = Math.abs(e.deltaY);
+      const fresh = e.timeStamp - lastTime > 120 || abs > lastAbs;
+      lastAbs = abs; lastTime = e.timeStamp;
+      if (anim || !fresh || abs < 6) return;
       e.deltaY > 0 ? next() : prev();
     }, { passive: false });
 
